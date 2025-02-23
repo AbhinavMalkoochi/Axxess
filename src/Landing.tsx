@@ -15,6 +15,7 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import AudioSummary from "./components/AudioSummary"
 import PrescribedMedications from "./components/Medications"
 import { supabase } from "./supabaseClient"
+import AppointmentCalendar from "./components/AppointmentCalendar"
 import OpenAI from "openai"
 const data = [
     { date: "Jan 1", "Blood Pressure": 120, "Heart Rate": 80 },
@@ -43,21 +44,21 @@ export default function ProviderDashboard() {
     const [isProcessing, setIsProcessing] = useState(false)
     const extractMedications = (summary: string): MedicationItem[] => {
         try {
-            // Match JSON array pattern in the summary text
-            const jsonMatch = summary.match(/\[.*?\]/s);
-            if (!jsonMatch) return [];
+            // Match the JSON object in the summary text
+            const jsonMatch = summary.match(/\{.*?\}/s);
+            if (!jsonMatch) return []; // If no JSON is found, return an empty array
 
-            // Clean and transform the JSON
-            const cleanedJson = jsonMatch[0]
-                .replace(/{/g, '[')  // Replace object braces with array brackets
-                .replace(/}/g, ']')  // Replace object braces with array brackets
-                .replace(/"([^"]+)"/g, (_, m) => `"${m.trim()}"`) // Clean whitespace in quotes
-                .replace(/'/g, '"'); // Standardize quotes
+            // Extract the JSON string
+            const jsonString = jsonMatch[0];
 
-            const parsed = JSON.parse(cleanedJson);
+            // Parse the JSON string
+            const parsed = JSON.parse(jsonString);
+
+            // Safely access the medications array
+            const medications = parsed.medications || [];
 
             // Convert array format to MedicationItem objects
-            return parsed.map((item: string[]) => ({
+            return medications.map((item: string[]) => ({
                 name: item[0] || 'Unknown',
                 dosage: item[1] || 'Dosage not specified'
             }));
@@ -66,17 +67,7 @@ export default function ProviderDashboard() {
             return [];
         }
     };
-    useEffect(() => {
-        const getAppointments = async () => {
-            const { data, error } = await supabase.from('appointments').select('date,id,name')
-            if (error) {
-                console.error('Error fetching appointments:', error)
-                return
-            }
-            setAppointments(data)
-        }
-        getAppointments()
-    }, [])
+
 
     const handleAudioUpload = async (file: File) => {
         let transcriptionResponse;
@@ -103,7 +94,23 @@ export default function ProviderDashboard() {
             messages: [
                 {
                     "role": "user",
-                    "content": `Given this audio transcription, summarize this conversation between a doctor and patient in two concise sentences. Additionally, if any medications are mentioned, in the beginning of the response, create an array in the format of [{'A', '20mg'},{'B','50mg'}] for all medications. Make sure to  Conversation:**Doctor:** Good morning, Mr. Thompson. How are you feeling today?  
+                    "content": `Given this audio transcription, summarize this conversation between a doctor and patient in a pargraph with detailed information.  for medication extraction:
+- Include ONLY medications explicitly mentioned with their dosages
+- If dosage isn't specified, use "dosage not specified"
+- Maintain exact medication names as mentioned
+- Include any frequency or duration if mentioned
+- The array must be properly formatted JSON
+
+2. Provide a paragraph summary of the conversation.
+
+Format your response exactly like this:
+{
+    "medications": [
+        ["medication_name1", "dosage1"],
+        ["medication_name2", "dosage2"]
+    ],
+                }
+     Make sure to  Conversation:**Doctor:** Good morning, Mr. Thompson. How are you feeling today?  
 
 **Patient:** Morning, doctor. I’m still feeling a bit weak on my right side, and my speech is a little slow. But I think it's improving.  
 
@@ -167,10 +174,10 @@ export default function ProviderDashboard() {
         const chatbotPrompt = `Role: AI Medical Assistant conducting a follow-up call based on previous doctor's visit transcription
 
 Context from Previous Visit:
-${audioSummary}
-
+Should I book an appointment Febuary 22, 2025 at 5pm?
+Yes, book it 
 Instructions:
-1. Reference the above transcription throughout the conversation
+1. Reference the above transcription throughout the conversation. Make sure to specifically mention the patient's symptoms, medications, and any other relevant details from the transcription.
 2. Ask specific follow-up questions about symptoms/conditions mentioned in the transcription
 3. Compare current state with previously reported conditions
 4. Verify if prescribed treatments from last visit were effective
@@ -229,12 +236,12 @@ Remember to:
             method: "POST",
             headers: {
                 authorization:
-                    "org_71429208a172f5e77eab330b5200fc8a123197d25094a20cdce5d22345279ea8045ab193cad162b8f8e869",
+                    "org_26902c159dcdba4cde64a6c5323b1f20f5e6419bc471ef2ad1f17a572e587d97e57fc3ba05cae0f1077469",
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
                 phone_number: phoneNumber,
-                pathway_id: "f3678bfa-b298-41f8-b975-34207fc3b6a6",
+                // pathway_id: "0a95378e-e442-47ea-8b7b-07b1bee01b54",
                 task: chatbotPrompt,
                 voice: "evelyn",
                 language: "en",
@@ -266,12 +273,44 @@ Remember to:
                         `https://api.bland.ai/v1/calls/${callId}`,
                         getOptions,
                     )
-                    if (!detailsResponse.ok)
+                    if (!detailsResponse.ok) {
                         throw new Error(
                             `Failed to fetch call details: ${detailsResponse.statusText}`,
                         )
+                    }
                     const detailsData = await detailsResponse.json()
                     console.log("Call Summary:", detailsData.summary)
+                    const openAIResponse = await openai.chat.completions.create({
+                        model: "gpt-4",
+                        messages: [
+                            {
+                                role: "system",
+                                content: `Extract the appointment date and name from the following conversation summary. Return only a JSON object with 'date' (in ISO format) and 'name' fields.  Following is the summary: ${detailsData.summary}`
+                            },
+
+                        ],
+                    });
+
+                    console.log("OpenAI Response:", openAIResponse.choices[0].message.content)
+                    // Parse the OpenAI response
+                    const extractedData = JSON.parse(openAIResponse.choices[0].message.content || "{}");
+                    console.log("Extracted Data:", extractedData.date, extractedData.name)
+
+                    // Update appointments state with new appointment
+                    setAppointments(prev => [...prev, {
+                        date: extractedData.date,
+                        name: extractedData.name
+                    }]);
+                    // Store in database (example using Supabase)
+                    const { error } = await supabase
+                        .from('appointments')
+                        .insert([
+                            {
+                                date: extractedData.date,
+                                name: extractedData.name,
+                            }
+                        ]);
+                    if (error) throw new Error(`Database insert failed: ${error.message}`)
                     // Update the call summary for this particular patient update
                     setCallSummaries(prev => ({ ...prev, [index]: detailsData.summary }))
                 } catch (error: any) {
@@ -283,17 +322,28 @@ Remember to:
                 } finally {
                     setCallLoading(prev => ({ ...prev, [index]: false }))
                 }
-            }, 60000) // Wait for 60 seconds before fetching call details
+            }, 180000) // Wait for 120 seconds before fetching call details
         } catch (error: any) {
             console.error("Error:", error.message)
             setCallSummaries(prev => ({ ...prev, [index]: error.message }))
             setCallLoading(prev => ({ ...prev, [index]: false }))
         }
     }
-
+    useEffect(() => {
+        const generateGraph = async () => {
+            let prompt = `You are a helpful assistant that generates graph nodes and relationships. Given the input data text, generate an array of nodes and relations. Create edges between nodes that are related and define the label of the edge to define the relationship type. The nodes will contain the following properties: id, name (string), category (string), description (string). The result should be a valid JSON array with the nodes and edges all in a single line with no line breaks, spaces, or additional formatting. The format should be exactly as follows, all on one line: { "nodes": [ { "id": 1, "name": "Node 1", "category": "Category 1", "description": "Description 1" }, { "id": 2, "name": "Node 2", "category": "Category 2", "description": "Description 2" } ], "edges": [ { "source": 1, "target": 2, "label": "Edge 1" } ] }. Do not add any formatting, line breaks, or other formatting styles such as "/n" or "/t". Return only the valid JSON in a single line.`;
+            const chatCompletion = await openai.chat.completions.create({
+                model: 'gpt-3.5-turbo',
+                messages: [{ role: 'user', content: prompt }, { role: 'system', content: prompt }],
+            });
+            console.log(chatCompletion.choices[0].message.content)
+        }
+        generateGraph()
+    }, [])
     return (
         <div className="flex min-h-screen bg-background">
             {/* Sidebar */}
+            <button onClick={() => handleCall(0)}>BOB TEST</button>
             <div className="hidden w-72 flex-col border-r bg-muted/10 md:flex">
                 <div className="p-6">
                     <div className="flex items-center gap-2">
@@ -459,13 +509,7 @@ Remember to:
                             </CardContent>
                         </Card>
                         <Card className="md:col-span-3">
-                            <CardHeader>
-                                <CardTitle>Upcoming Appointments</CardTitle>
-                                <CardDescription>View and manage your schedule</CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <Calendar className="w-full" mode="single" />
-                            </CardContent>
+                            <AppointmentCalendar />
                         </Card>
                     </div>
 
