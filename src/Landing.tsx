@@ -39,7 +39,7 @@ export default function ProviderDashboard() {
     const [callLoading, setCallLoading] = useState<{ [key: number]: boolean }>({})
     const [appointments, setAppointments] = useState<any[]>([])
     const openai = new OpenAI({
-        apiKey: "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", dangerouslyAllowBrowser: true
+        apiKey: `${import.meta.env.VITE_OPENAI_API_KEY}`, dangerouslyAllowBrowser: true
     });
     const [isProcessing, setIsProcessing] = useState(false)
     const extractMedications = (summary: string): MedicationItem[] => {
@@ -236,7 +236,7 @@ Remember to:
             method: "POST",
             headers: {
                 authorization:
-                    "org_26902c159dcdba4cde64a6c5323b1f20f5e6419bc471ef2ad1f17a572e587d97e57fc3ba05cae0f1077469",
+                    `${import.meta.env.VITE_BLAND_API_KEY}`,
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
@@ -328,7 +328,7 @@ Remember to:
             setCallSummaries(prev => ({ ...prev, [index]: error.message }))
             setCallLoading(prev => ({ ...prev, [index]: false }))
         }
-    }
+    }/*
     useEffect(() => {
         const generateGraph = async () => {
             let prompt = `You are a helpful assistant that generates graph nodes and relationships. Given the input data text, generate an array of nodes and relations. Create edges between nodes that are related and define the label of the edge to define the relationship type. The nodes will contain the following properties: id, name (string), category (string), description (string). The result should be a valid JSON array with the nodes and edges all in a single line with no line breaks, spaces, or additional formatting. The format should be exactly as follows, all on one line: { "nodes": [ { "id": 1, "name": "Node 1", "category": "Category 1", "description": "Description 1" }, { "id": 2, "name": "Node 2", "category": "Category 2", "description": "Description 2" } ], "edges": [ { "source": 1, "target": 2, "label": "Edge 1" } ] }. Do not add any formatting, line breaks, or other formatting styles such as "/n" or "/t". Return only the valid JSON in a single line.`;
@@ -339,7 +339,7 @@ Remember to:
             console.log(chatCompletion.choices[0].message.content)
         }
         generateGraph()
-    }, [])
+    }, [])*/
     return (
         <div className="flex min-h-screen bg-background">
             {/* Sidebar */}
