@@ -17,6 +17,8 @@ import PrescribedMedications from "./components/Medications"
 import { supabase } from "./supabaseClient"
 import AppointmentCalendar from "./components/AppointmentCalendar"
 import OpenAI from "openai"
+import { useNavigate } from "@tanstack/react-router"
+import { useGraphStore } from "./store"
 const data = [
     { date: "Jan 1", "Blood Pressure": 120, "Heart Rate": 80 },
     { date: "Jan 2", "Blood Pressure": 125, "Heart Rate": 82 },
@@ -41,6 +43,7 @@ export default function ProviderDashboard() {
     const openai = new OpenAI({
         apiKey: `${import.meta.env.VITE_OPENAI_API_KEY}`, dangerouslyAllowBrowser: true
     });
+    const { value, setValue } = useGraphStore();
     const [isProcessing, setIsProcessing] = useState(false)
     const extractMedications = (summary: string): MedicationItem[] => {
         try {
@@ -149,6 +152,7 @@ Format your response exactly like this:
             ]
         });
         const messageContent = completion.choices[0].message.content || ""; // Default to an empty string if null
+        setValue(value + messageContent)
         console.log("Completion:", messageContent);
         setAudioSummary(messageContent); // Now it's guaranteed to be a string
     };
@@ -190,32 +194,25 @@ Conversation Flow:
 Example: "Hello, I'm calling about your recent visit where you discussed [specific symptoms from transcription]. I'd like to follow up on how you're doing with [specific treatment/medication mentioned]."
 
 2. Detailed Follow-up Questions (Based on Transcription)
+- Tell the patient what the doctor diagnosed them with
+- Inform the patient on their issues and how they should proceed
 - Ask about specific symptoms mentioned in the transcription
 - Check if prescribed medications/treatments are being followed
 - Compare current state with previously reported conditions
 Example Questions:
-- "During your last visit, you mentioned [specific symptom from transcription]. How has that changed since then?"
-- "Dr. [Name] prescribed [medication from transcription]. How are you responding to that?"
 - "Last time, you reported [specific issue from transcription]. Is this still occurring?"
-
-3. New Symptoms or Concerns
-- Ask if any new symptoms have developed since the last visit
-- Inquire about side effects from prescribed treatments
-- Check for any lifestyle changes recommended in the previous visit
 
 4. Treatment Adherence
 - Verify if patient is following the treatment plan from last visit
-- Ask about any difficulties with prescribed medications
-- Check if they're following any lifestyle recommendations mentioned in the transcription
-
+-
 5. Appointment Scheduling
 - Reference any follow-up timeline mentioned in the transcription
-- Offer appointments starting from February 22, 2025
+- Offer appointments starting from February 23, 2025
 - Schedule follow-up based on urgency of symptoms discussed
+- Specify an exact day, year, and time for the appointment
 
 6. Summary and Documentation
 - Summarize changes since last visit
-- Confirm current medications and treatments
 - Document any new concerns for the doctor
 
 End the call by:
@@ -243,7 +240,7 @@ Remember to:
                 phone_number: phoneNumber,
                 // pathway_id: "0a95378e-e442-47ea-8b7b-07b1bee01b54",
                 task: chatbotPrompt,
-                voice: "evelyn",
+                voice: "Public - Hawaii Female",
                 language: "en",
                 record: true,
                 metadata: {},
@@ -280,6 +277,7 @@ Remember to:
                     }
                     const detailsData = await detailsResponse.json()
                     console.log("Call Summary:", detailsData.summary)
+                    setValue(value + detailsData.summary)
                     const openAIResponse = await openai.chat.completions.create({
                         model: "gpt-4",
                         messages: [
@@ -328,7 +326,9 @@ Remember to:
             setCallSummaries(prev => ({ ...prev, [index]: error.message }))
             setCallLoading(prev => ({ ...prev, [index]: false }))
         }
-    }/*
+    }
+    const navigate = useNavigate()
+    /*
     useEffect(() => {
         const generateGraph = async () => {
             let prompt = `You are a helpful assistant that generates graph nodes and relationships. Given the input data text, generate an array of nodes and relations. Create edges between nodes that are related and define the label of the edge to define the relationship type. The nodes will contain the following properties: id, name (string), category (string), description (string). The result should be a valid JSON array with the nodes and edges all in a single line with no line breaks, spaces, or additional formatting. The format should be exactly as follows, all on one line: { "nodes": [ { "id": 1, "name": "Node 1", "category": "Category 1", "description": "Description 1" }, { "id": 2, "name": "Node 2", "category": "Category 2", "description": "Description 2" } ], "edges": [ { "source": 1, "target": 2, "label": "Edge 1" } ] }. Do not add any formatting, line breaks, or other formatting styles such as "/n" or "/t". Return only the valid JSON in a single line.`;
@@ -404,6 +404,9 @@ Remember to:
                             </Button>
                             <Button variant="ghost" className="hidden md:inline-flex">
                                 Calendar
+                            </Button>
+                            <Button variant="ghost" className="hidden md:inline-flex" onClick={() => navigate({ to: "/graph" })}>
+                                Graph
                             </Button>
                         </nav>
                     </div>
@@ -509,7 +512,7 @@ Remember to:
                             </CardContent>
                         </Card>
                         <Card className="md:col-span-3">
-                            <AppointmentCalendar />
+                            <AppointmentCalendar refresh={callSummaries} />
                         </Card>
                     </div>
 

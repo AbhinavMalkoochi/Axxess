@@ -9,7 +9,7 @@ interface Appointment {
 }
 
 
-const AppointmentCalendar = () => {
+const AppointmentCalendar = (refresh: any) => {
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -23,7 +23,7 @@ const AppointmentCalendar = () => {
             setAppointments(data);
         };
         getAppointments();
-    }, []);
+    }, [refresh]);
 
     // Get the first day of the month
     const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);

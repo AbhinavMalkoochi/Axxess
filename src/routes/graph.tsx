@@ -1,9 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
+import NetworkVisualization from '../Graph'
 
 export const Route = createFileRoute('/graph')({
-  component: RouteComponent,
+  component: NetworkVisualization,
 })
 
-function RouteComponent() {
-  return <div>Hello "/graph"!</div>
-}
