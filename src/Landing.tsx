@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar"
 import { Button } from "./components/ui/button"
 import { Calendar } from "./components/ui/calendar"
@@ -13,9 +13,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs"
 import { Bell, CalendarIcon, ChevronDown, MessageSquare, Search, Stethoscope, Users } from "lucide-react"
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import AudioSummary from "./components/AudioSummary"
-import AudioUploader from "./components/AudioUploader"
 import PrescribedMedications from "./components/Medications"
-
+import { supabase } from "./supabaseClient"
+import OpenAI from "openai"
 const data = [
     { date: "Jan 1", "Blood Pressure": 120, "Heart Rate": 80 },
     { date: "Jan 2", "Blood Pressure": 125, "Heart Rate": 82 },
@@ -23,35 +23,207 @@ const data = [
     { date: "Jan 4", "Blood Pressure": 128, "Heart Rate": 85 },
     { date: "Jan 5", "Blood Pressure": 124, "Heart Rate": 81 },
 ]
+interface MedicationItem {
+    name: string;
+    dosage: string;
+}
+
 
 export default function ProviderDashboard() {
-    const [audioFile, setAudioFile] = useState<File | null>(null)
+    const [audioFile, setAudioFile] = useState<File | null>(null);
     const [audioSummary, setAudioSummary] = useState<string>("")
     // State for storing call summaries per patient update (keyed by index)
-    const [callSummaries, setCallSummaries] = useState<{ [key: number]: string }>({})
+    const [callSummaries, setCallSummaries] = useState<{ [key: number]: string } | null>({})
     // State for tracking loading status per patient update
     const [callLoading, setCallLoading] = useState<{ [key: number]: boolean }>({})
+    const [appointments, setAppointments] = useState<any[]>([])
+    const openai = new OpenAI({
+        apiKey: "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", dangerouslyAllowBrowser: true
+    });
+    const [isProcessing, setIsProcessing] = useState(false)
+    const extractMedications = (summary: string): MedicationItem[] => {
+        try {
+            // Match JSON array pattern in the summary text
+            const jsonMatch = summary.match(/\[.*?\]/s);
+            if (!jsonMatch) return [];
 
-    const handleAudioUpload = (file: File) => {
-        setAudioFile(file)
-        // Simulate audio analysis (replace with actual API call in production)
-        setTimeout(() => {
-            setAudioSummary(
-                "Patient reports persistent cough and shortness of breath. Recommends follow-up chest X-ray and pulmonary function tests.",
-            )
-        }, 2000)
-    }
+            // Clean and transform the JSON
+            const cleanedJson = jsonMatch[0]
+                .replace(/{/g, '[')  // Replace object braces with array brackets
+                .replace(/}/g, ']')  // Replace object braces with array brackets
+                .replace(/"([^"]+)"/g, (_, m) => `"${m.trim()}"`) // Clean whitespace in quotes
+                .replace(/'/g, '"'); // Standardize quotes
+
+            const parsed = JSON.parse(cleanedJson);
+
+            // Convert array format to MedicationItem objects
+            return parsed.map((item: string[]) => ({
+                name: item[0] || 'Unknown',
+                dosage: item[1] || 'Dosage not specified'
+            }));
+        } catch (error) {
+            console.error('Error parsing medications:', error);
+            return [];
+        }
+    };
+    useEffect(() => {
+        const getAppointments = async () => {
+            const { data, error } = await supabase.from('appointments').select('date,id,name')
+            if (error) {
+                console.error('Error fetching appointments:', error)
+                return
+            }
+            setAppointments(data)
+        }
+        getAppointments()
+    }, [])
+
+    const handleAudioUpload = async (file: File) => {
+        let transcriptionResponse;
+        try {
+            setIsProcessing(true);
+
+            // Call the transcription API directly with the File object.
+            transcriptionResponse = await openai.audio.transcriptions.create({
+                file: file,
+                model: "whisper-1",
+            });
+            console.log("Transcription:", transcriptionResponse.text);
+            setAudioSummary(transcriptionResponse.text);
+        } catch (error) {
+            console.error("Error processing audio:", error);
+            setAudioSummary("Error processing audio file");
+        } finally {
+            setIsProcessing(false);
+        }
+        //summarize the audio file
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o",
+            store: true,
+            messages: [
+                {
+                    "role": "user",
+                    "content": `Given this audio transcription, summarize this conversation between a doctor and patient in two concise sentences. Additionally, if any medications are mentioned, in the beginning of the response, create an array in the format of [{'A', '20mg'},{'B','50mg'}] for all medications. Make sure to  Conversation:**Doctor:** Good morning, Mr. Thompson. How are you feeling today?  
+
+**Patient:** Morning, doctor. I’m still feeling a bit weak on my right side, and my speech is a little slow. But I think it's improving.  
+
+**Doctor:** That’s good to hear. Based on your progress, you’re showing signs of recovery, but we need to keep monitoring your condition closely. Let's go over a few things. You had an **ischemic stroke** about a week ago, caused by a blood clot blocking an artery in your brain. Do you remember experiencing any symptoms before it happened?  
+
+**Patient:** Yes, I remember my right arm suddenly feeling numb, and I had trouble speaking. My wife noticed my face was drooping and called 911 right away.  
+
+**Doctor:** That was absolutely the right thing to do. Getting medical help quickly can make a big difference in stroke treatment. When you arrived at the hospital, we gave you **tPA (tissue plasminogen activator)** to dissolve the clot since you were within the treatment window. Have you noticed any new or worsening symptoms since then?  
+
+**Patient:** No, nothing new. Just some weakness and trouble finding words sometimes.  
+
+**Doctor:** That’s expected, but with physical and speech therapy, you should continue to improve. Let’s talk about your medications. You're on **clopidogrel (Plavix)** as a blood thinner to prevent future clots and **atorvastatin (Lipitor)** to help lower your cholesterol. Have you had any side effects?  
+
+**Patient:** No major side effects, but I do feel a little dizzy sometimes.  
+
+**Doctor:** That can happen, especially when adjusting to blood thinners. Make sure you're drinking enough water and standing up slowly to avoid dizziness. I also see you have **high blood pressure and diabetes**, which are major risk factors for strokes. Your **lisinopril** for blood pressure and **metformin** for diabetes are essential in preventing another stroke. Have you been monitoring your blood sugar and pressure at home?  
+
+**Patient:** Yes, I check my blood pressure every morning, and it’s usually around **135/85**, which is better than before. My blood sugar has been stable, too.  
+
+**Doctor:** That’s a good improvement, but we want your blood pressure closer to **120/80** to reduce stroke risk. Keep taking your medications as prescribed, and let’s also focus on diet and exercise. Are you following a **low-sodium, heart-healthy diet**?  
+
+**Patient:** I’ve cut down on salt and fried foods, and I’ve started walking 20 minutes a day.  
+
+**Doctor:** That’s great progress! Keep it up. Regular exercise, along with a **Mediterranean-style diet** rich in vegetables, whole grains, and healthy fats, can lower your risk significantly.  
+
+**Patient:** I’ll do my best. How long will I need to take these medications?  
+
+**Doctor:** Some, like **clopidogrel**, may be temporary, but others, like **atorvastatin and lisinopril**, could be lifelong, depending on your condition. We’ll reassess in a few months.  
+
+**Patient:** Understood. Thank you, doctor.  
+
+**Doctor:** You’re doing well, Mr. Thompson. Keep up with your rehab, stay consistent with your medications, and we’ll see you for a follow-up in four weeks. Let me know if you have any concerns before then.  
+
+**Patient:** Will do. Thanks again, doctor.`
+                }
+            ]
+        });
+        const messageContent = completion.choices[0].message.content || ""; // Default to an empty string if null
+        console.log("Completion:", messageContent);
+        setAudioSummary(messageContent); // Now it's guaranteed to be a string
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            setAudioFile(file);
+            await handleAudioUpload(file);
+        }
+    };
+
+
 
     // The handleCall function uses a fixed phone number (for demo purposes).
     // It sends a call request and then, after a delay, fetches the call summary.
     const handleCall = async (index: number) => {
         // Mark this patient update as loading
         setCallLoading(prev => ({ ...prev, [index]: true }))
-
+        console.log("AUDIO SUMMary", audioSummary)
         // For demonstration, using a fixed phone number.
         const phoneNumber = "6307310098"
-        const chatbotPrompt = `RRoles:\n\n    AI Assistant (You) – A virtual medical assistant that updates the patient on their condition, collects health updates, and books appointments.\n    Patient (User) – A patient calling to receive an update, discuss their condition, and potentially schedule an appointment.\n\nConversation Flow:\n1. Greet the Patient & Verify Identity\n\n    Start with a warm, professional greeting.\n    Verify the patient's name and confirm that they are ready to receive an update.\n    Ensure a calm and reassuring tone throughout the conversation.\n\nExample:\n💬 AI: \"Hello, this is your AI assistant from [Clinic Name]. Am I speaking with [Patient's Name]? I have your latest update from the doctor. Is this a good time to go over your condition and discuss any concerns you may have?\"\n2. Provide a Detailed Update on the Patient's Condition\n\n    Summarize the doctor's latest notes, including:\n        Current Diagnosis & Status – Any improvements or concerns noted.\n        Medication & Dosage Changes – Any new prescriptions or adjustments.\n        Treatment Plan Updates – Lifestyle changes, physical therapy, or dietary recommendations.\n        Next Steps – Whether further testing, check-ups, or precautions are necessary.\n    Provide reassurance and explain medical instructions clearly.\n\nExample:\n💬 AI: \"Based on your last appointment, your doctor noted that your recovery is progressing well. However, they still recommend continuing your current medication for another two weeks. They also mentioned that your inflammation levels have decreased slightly, but it's important to monitor any recurring symptoms. Additionally, they suggest light exercise such as short walks to aid circulation and energy levels. How have you been feeling since your last visit?\"\n3. Gather Patient Updates on Their Condition\n\n    Encourage the patient to describe their current symptoms and any noticeable changes since their last appointment.\n    Follow up based on their responses to get specific details.\n    Ask about daily activities, pain levels, sleep quality, appetite, mood, and side effects from medication.\n\nExample Questions:\n\n    \"Have you noticed any improvement or worsening of your symptoms?\"\n    \"Are you experiencing any side effects from your medication, such as nausea or dizziness?\"\n    \"How is your energy level throughout the day? Do you feel fatigued more often?\"\n    \"Has your sleep been restful, or are you waking up frequently?\"\n    \"Are you able to eat properly, or have you noticed any changes in appetite?\"\n\nExample Interaction:\n💬 Patient: \"I feel a little better, but I still have some fatigue, especially in the mornings.\"\n\n💬 AI: \"I'm glad you're seeing some improvement. Morning fatigue can sometimes be related to hydration, sleep quality, or medication side effects. Have you been sleeping well, or do you feel unrested when you wake up?\"\n\n💬 Patient: \"I wake up feeling tired, even if I sleep for a full 8 hours.\"\n\n💬 AI: \"That's important to note. Sometimes, this can indicate an issue with sleep quality rather than sleep duration. Have you experienced any trouble falling asleep or waking up in the middle of the night?\"\n\n💬 Patient: \"Not really, but I do feel sluggish for the first couple of hours after waking up.\"\n\n💬 AI: \"Understood. Your doctor might want to check if this is related to your medication or an underlying factor like low blood pressure in the morning. I'll make a note of that for your next visit. Are you experiencing any dizziness or headaches alongside the fatigue?\"\n4. Offer to Book an Appointment\n\n    Ask if the patient would like to schedule a follow-up appointment.\n    If they agree, ask for a preferred date and time (starting from February 22, 2025).\n    If their requested time is unavailable, suggest an alternative slot.\n    Confirm the booking and provide details.\n\nExample Interaction:\n💬 AI: \"Would you like to schedule a follow-up appointment to discuss your progress? The doctor is available starting from February 22, 2025.\"\n\n💬 Patient: \"Yes, I'd like to book one for February 24 at 10 AM.\"\n\n💬 AI: \"I've scheduled your appointment for February 24 at 10 AM with Dr. [Doctor's Name]. You will receive a confirmation text shortly. Would you like a reminder a day before your appointment?\"\n\n💬 Patient: \"Yes, that would be helpful.\"\n\n💬 AI: \"Great! I'll set up a reminder for you. Is there anything else I can assist you with today?\"\n5. End the Call with Reassurance\n\n    Provide a summary of key points discussed.\n    Offer any final reminders about their medication or treatment plan.\n    End on a supportive note.\n\nExample:\n💬 AI: \"To summarize, your doctor noted improvement but recommends continuing medication and monitoring fatigue levels. You mentioned experiencing morning sluggishness, which we've noted for discussion at your appointment on February 24 at 10 AM. Please continue with light exercise and stay hydrated. If you notice any sudden changes in your condition, feel free to reach out. Have a great day!\n
-    `
+        const chatbotPrompt = `Role: AI Medical Assistant conducting a follow-up call based on previous doctor's visit transcription
+
+Context from Previous Visit:
+${audioSummary}
+
+Instructions:
+1. Reference the above transcription throughout the conversation
+2. Ask specific follow-up questions about symptoms/conditions mentioned in the transcription
+3. Compare current state with previously reported conditions
+4. Verify if prescribed treatments from last visit were effective
+
+Conversation Flow:
+
+1. Initial Greeting & Context Setting
+- Greet the patient professionally
+- Reference specific details from their last visit (using transcription)
+Example: "Hello, I'm calling about your recent visit where you discussed [specific symptoms from transcription]. I'd like to follow up on how you're doing with [specific treatment/medication mentioned]."
+
+2. Detailed Follow-up Questions (Based on Transcription)
+- Ask about specific symptoms mentioned in the transcription
+- Check if prescribed medications/treatments are being followed
+- Compare current state with previously reported conditions
+Example Questions:
+- "During your last visit, you mentioned [specific symptom from transcription]. How has that changed since then?"
+- "Dr. [Name] prescribed [medication from transcription]. How are you responding to that?"
+- "Last time, you reported [specific issue from transcription]. Is this still occurring?"
+
+3. New Symptoms or Concerns
+- Ask if any new symptoms have developed since the last visit
+- Inquire about side effects from prescribed treatments
+- Check for any lifestyle changes recommended in the previous visit
+
+4. Treatment Adherence
+- Verify if patient is following the treatment plan from last visit
+- Ask about any difficulties with prescribed medications
+- Check if they're following any lifestyle recommendations mentioned in the transcription
+
+5. Appointment Scheduling
+- Reference any follow-up timeline mentioned in the transcription
+- Offer appointments starting from February 22, 2025
+- Schedule follow-up based on urgency of symptoms discussed
+
+6. Summary and Documentation
+- Summarize changes since last visit
+- Confirm current medications and treatments
+- Document any new concerns for the doctor
+
+End the call by:
+1. Summarizing key differences from last visit
+2. Confirming next steps
+3. Providing emergency contact information if needed
+
+Required Mention Points:
+${audioSummary.split('.').map(point => `- Follow up on: ${point.trim()}`).join('\n')}
+
+Remember to:
+- Keep referencing specific details from the previous visit transcription
+- Compare current symptoms with those in the transcription
+- Focus follow-up questions on previously discussed issues
+- Note any improvements or deterioration since last visit`
 
         const options = {
             method: "POST",
@@ -328,7 +500,7 @@ export default function ProviderDashboard() {
                                                     </span>
                                                 </div>
                                                 {/* Replace the default text with the call summary if available */}
-                                                {callSummaries[i] ? (
+                                                {callSummaries && callSummaries[i] ? (
                                                     <p className="text-sm text-muted-foreground">
                                                         {callSummaries[i]}
                                                     </p>
@@ -413,7 +585,7 @@ export default function ProviderDashboard() {
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <AudioUploader onUpload={handleAudioUpload} />
+                                <input type="file" onChange={handleFileChange} />
                                 <AudioSummary summary={audioSummary} />
                             </CardContent>
                         </Card>
@@ -423,7 +595,7 @@ export default function ProviderDashboard() {
                                 <CardDescription>Current patient medications</CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <PrescribedMedications />
+                                <PrescribedMedications medications={extractMedications(audioSummary)} />
                             </CardContent>
                         </Card>
                     </div>
