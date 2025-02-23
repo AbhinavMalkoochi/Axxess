@@ -5,13 +5,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar"
 import { Button } from "./components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./components/ui/card"
 import { Switch } from "./components/ui/switch"
-import { Bell } from "lucide-react"
+import { Bell, CalendarIcon, ChevronDown, MessageSquare, Search, Stethoscope, Users, Upload } from "lucide-react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls"
 import { Input } from "./components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select"
 import OpenAI from "openai"
 import { useGraphStore } from "./store"
+import { useNavigate } from "@tanstack/react-router"
 
 
 
@@ -349,70 +350,72 @@ Input: "John Doe has diabetes and high blood pressure. He takes Metformin for di
         setNodes(nodes);
         setEdges(edges);
     }
-
+    const navigate = useNavigate()
     const [isLeftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false)
     const [isRightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
 
 
     return (
-        <div className="flex min-h-screen bg-background">
-
+        <div className="flex min-h-screen bg-background min-w-screen w-screen">
+{/* Sidebar */}
+<div className="hidden w-80 flex-col border-r relative bg-white dark:bg-gray-800 shadow-sm md:flex">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-8">
+            <Stethoscope className="h-8 w-8 text-primary" />
+            <h2 className="text-2xl font-bold">MedCare Pro</h2>
+          </div>
+          <div className="mb-8">
+            <div className="relative">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Search patients..."
+                className="w-full bg-gray-50 dark:bg-gray-700 pl-10 h-12 rounded-xl"
+              />
+            </div>
+          </div>
+          <nav className="space-y-6">
+            <div>
+              <div className="flex items-center gap-2 mb-4 px-2">
+                <Users className="h-5 w-5" />
+                <span className="text-sm font-semibold">Patients</span>
+              </div>
+              <div className="space-y-1">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Button
+                    key={i}
+                    variant="ghost"
+                    onClick={()=>navigate({to:'/'})}
+                    className="w-full justify-start gap-3 rounded-xl h-14 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={`/placeholder.svg?height=32&width=32`} />
+                      <AvatarFallback>P{i + 1}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col items-start">
+                      <span className="font-medium">Patient {i + 1}</span>
+                      <span className="text-xs text-muted-foreground">Last visit: 2 days ago</span>
+                    </div>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </nav>
+        </div>
+      </div>
             {/* Main Content Area */}
             <main
-                className={`flex-1 transition-all duration-300 ease-in-out ${isLeftSidebarCollapsed ? "ml-6" : "ml-64"} ${isRightSidebarCollapsed ? "mr-6" : "mr-80"
-                    } max-w-full`}
+                className={`flex-1 transition-all duration-300 ease-in-out 
+                    } min-w-screen`}
             >
-                <div className="max-w-7xl mx-auto p-8 space-y-6">
+                <div className="max-w-7xl mx-auto p-8 space-y-6 w-full">
                     <header className="flex items-center justify-between">
                         <h1 className="text-2xl font-semibold">Your Network</h1>
-                        <button onClick={connectOpenAI}>Generate Graph</button>
-                        <div className="flex gap-4">
-                            <Select onValueChange={(value: any) => setRoleFilter(value)}>
-                                <SelectTrigger className="w-32 bg-white/10">
-                                    <SelectValue placeholder="Filter by Role" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Marketing">Marketing</SelectItem>
-                                    <SelectItem value="Engineering">Engineering</SelectItem>
-                                    <SelectItem value="Design">Design</SelectItem>
-                                </SelectContent>
-                            </Select>
-
-
-                            <Select onValueChange={(value: any) => setSkillFilter(value)}>
-                                <SelectTrigger className="w-32 bg-white/10">
-                                    <SelectValue placeholder="Filter by Skill" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="SEO">SEO</SelectItem>
-                                    <SelectItem value="Development">Development</SelectItem>
-                                    <SelectItem value="UX Design">UX Design</SelectItem>
-                                </SelectContent>
-                            </Select>
-
-
-                            <Select onValueChange={(value: any) => setIndustryFilter(value)}>
-                                <SelectTrigger className="w-32 bg-white/10">
-                                    <SelectValue placeholder="Filter by Industry" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Tech">Technology</SelectItem>
-                                    <SelectItem value="Finance">Finance</SelectItem>
-                                    <SelectItem value="Health">Healthcare</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </header>
-
-
-                    <div className="flex gap-4 justify-end">
-                        <Button variant="outline" className="bg-black text-white border-white/20">
-                            Upload Data
-                        </Button>
-                        <Button variant="outline" className="bg-black text-white border-white/20">
-                            Download Data
-                        </Button>
-                    </div>
+                        <div className="flex flex-wrap gap-2">
+            <Button onClick={connectOpenAI} variant="default">
+              Generate Graph
+            </Button>
+          </div>                    </header>
 
 
                     <Card className="bg-black p-4">
@@ -459,8 +462,6 @@ Input: "John Doe has diabetes and high blood pressure. He takes Metformin for di
 
 
                     <Card className="bg-white/5 p-6 space-y-4">
-                        <h2 className="text-lg font-medium">Chat</h2>
-                        <div className="min-h-[200px] bg-gray-100 rounded-lg p-4">{/* Chat messages would go here */}</div>
                         <div className="space-y-4">
                             <div className="flex gap-2">
                                 <Button
@@ -513,13 +514,7 @@ Input: "John Doe has diabetes and high blood pressure. He takes Metformin for di
                                 </Button>
                             </div>
                             <div className="flex gap-2">
-                                <Input
-                                    value={message}
-                                    onChange={(e: any) => setMessage(e.target.value)}
-                                    className="flex-1 bg-transparent border-white/20"
-                                    placeholder="Type your message..."
-                                />
-                                <Button className="bg-black hover:bg-black/80">Send</Button>
+
                             </div>
                         </div>
                     </Card>
